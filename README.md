@@ -6,6 +6,12 @@ A comprehensive machine learning project that detects fake news using advanced N
 
 This project implements a binary classification system to identify fake news articles using the LIAR dataset. It combines state-of-the-art transformer models with ensemble methods and provides an intuitive web interface for real-time predictions with explainability features.
 
+### 📄 Project Documentation
+
+- **📊 [Presentation](https://docs.google.com/presentation/d/1ECi1BrFgrRViLBwCyCRU-DeX4srU2HfLxnrqjb6r_YQ/edit?usp=sharing)**: Comprehensive slides covering methodology, results, and insights
+- **📝 [Report](https://docs.google.com/document/d/16fFC8flnumt_NdQ_-IpAwZ20urkBM82BNYRjol1eBsA/edit?usp=sharing)**: Detailed technical report with complete analysis
+- **[Video](https://youtu.be/u295YOmxE-A)**: Youtube Video 
+
 ## ✨ Key Features
 
 - **Deep Learning Models**:
