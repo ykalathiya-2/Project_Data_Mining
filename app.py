@@ -84,7 +84,6 @@ def find_model_path(filename):
     return None
 
 ROBERTA_PATH = find_model_path('roberta_best.pt')
-AUTOGLUON_PATH = find_model_path('autogluon_model')
 
 # ============================================================================
 # MODEL LOADING
@@ -105,16 +104,6 @@ def load_transformer_model():
     model = model.to(DEVICE)
     model.eval()
     return tokenizer, model
-
-@st.cache_resource
-def load_autogluon_model():
-    if not AUTOGLUON_PATH:
-        return None
-    try:
-        from autogluon.tabular import TabularPredictor
-        return TabularPredictor.load(AUTOGLUON_PATH, require_py_version_match=False)
-    except:
-        return None
 
 # ============================================================================
 # PREDICTION FUNCTIONS
@@ -138,43 +127,6 @@ def predict_transformer(text, tokenizer, model):
     pred_idx = torch.argmax(probs, dim=1).item()
     return pred_idx, probs[0].cpu().numpy()
 
-def predict_autogluon(text, speaker, party, predictor):
-    data = pd.DataFrame({
-        'statement_clean': [clean_text(text)],
-        'speaker': [speaker],
-        'party': [party],
-        'state': ['unknown'],
-        'barely_true_count': [0], 'false_count': [0],
-        'half_true_count': [0], 'mostly_true_count': [0],
-        'pants_fire_count': [0]
-    })
-    pred = predictor.predict(data)[0]
-    proba = predictor.predict_proba(data)
-    
-    # Handle probability extraction safely
-    try:
-        # Check column names to ensure correct order [FAKE, REAL]
-        # Assuming 0=Fake, 1=Real usually, but AutoGluon might use labels
-        cols = proba.columns.tolist()
-        
-        # If columns are integers 0 and 1
-        if 0 in cols and 1 in cols:
-            p_fake = proba[0].iloc[0]
-            p_real = proba[1].iloc[0]
-        # If columns are strings '0' and '1'
-        elif '0' in cols and '1' in cols:
-            p_fake = proba['0'].iloc[0]
-            p_real = proba['1'].iloc[0]
-        # If columns are labels like 'FAKE', 'REAL' (adjust based on your actual labels)
-        else:
-            # Fallback: take first as fake, second as real (risky but necessary if unknown)
-            p_fake = proba.iloc[0, 0]
-            p_real = proba.iloc[0, 1]
-            
-        return int(pred), np.array([p_fake, p_real])
-    except:
-        return int(pred), np.array([0.5, 0.5]) # Fallback
-
 # ============================================================================
 # MAIN APP
 # ============================================================================
@@ -185,22 +137,10 @@ def main():
     # Sidebar
     with st.sidebar:
         st.header("Settings")
-        model_type = st.radio("Choose Model", ["Transformer (RoBERTa)", "AutoGluon (Ensemble)"])
-        st.markdown("---")
         st.info("This tool uses machine learning to estimate the probability of a statement being Fake or Real.")
 
     # Input
     text_input = st.text_area("Enter Statement:", height=150, placeholder="Type or paste the statement here...")
-    
-    speaker = "unknown"
-    party = "none"
-    
-    if model_type == "AutoGluon (Ensemble)":
-        col1, col2 = st.columns(2)
-        with col1:
-            speaker = st.text_input("Speaker Name (Optional)", "unknown")
-        with col2:
-            party = st.selectbox("Party (Optional)", ["none", "democrat", "republican", "independent"])
 
     if st.button("Analyze Statement"):
         if not text_input.strip():
@@ -210,16 +150,10 @@ def main():
         # Load Model
         with st.spinner("Loading model..."):
             tokenizer, model = load_transformer_model()
-            ag_model = load_autogluon_model()
 
         # Predict
         with st.spinner("Analyzing..."):
-            if model_type == "AutoGluon (Ensemble)" and ag_model:
-                pred, probs = predict_autogluon(text_input, speaker, party, ag_model)
-            else:
-                if model_type == "AutoGluon (Ensemble)":
-                    st.warning("AutoGluon model not found. Falling back to RoBERTa.")
-                pred, probs = predict_transformer(text_input, tokenizer, model)
+            pred, probs = predict_transformer(text_input, tokenizer, model)
 
         # Display Results
         st.markdown("### Analysis Results")
@@ -254,21 +188,31 @@ def main():
         st.progress(float(probs[1]))
 
         # XAI Section
-        if model_type == "Transformer (RoBERTa)":
-            st.markdown("---")
-            with st.expander("See Why (Explainability)"):
+        st.markdown("---")
+        with st.expander("See Why (Explainability)"):
+            try:
                 st.write("Generating explanation...")
                 explainer = LimeTextExplainer(class_names=['FAKE', 'REAL'])
                 
                 def predictor_func(texts):
-                    inputs = tokenizer(texts, return_tensors="pt", max_length=MAX_LENGTH, truncation=True, padding='max_length')
+                    # Handle batch of texts from LIME
+                    cleaned_texts = [clean_text(t) for t in texts]
+                    inputs = tokenizer(cleaned_texts, return_tensors="pt", max_length=MAX_LENGTH, 
+                                     truncation=True, padding='max_length')
                     inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
                     with torch.no_grad():
                         outputs = model(**inputs)
                         return torch.softmax(outputs.logits, dim=1).cpu().numpy()
 
                 exp = explainer.explain_instance(clean_text(text_input), predictor_func, num_features=10)
-                st.pyplot(exp.as_pyplot_figure())
+                
+                # Create and display the figure
+                fig = exp.as_pyplot_figure()
+                st.pyplot(fig)
+                plt.close(fig)  # Clean up to avoid memory issues
+            except Exception as e:
+                st.error(f"Error generating explanation: {str(e)}")
+                st.info("Try with a shorter or simpler statement.")
 
 if __name__ == "__main__":
     main()
